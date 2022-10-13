@@ -1,0 +1,19 @@
+name: Upload
+
+on: workflow_dispatch
+
+jobs:
+  build_and_upload:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Upload to S3
+        uses: prewk/s3-cp-action@v2
+        with:
+          source: ./dist
+          dest: s3://ce-cdn.net/jsnes-ceweb
+          flags: --recursive
+          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

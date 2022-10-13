@@ -1,0 +1,176 @@
+<!doctype html>
+<html>
+
+<head>
+    <title>JSNES for CE</title>
+</head>
+
+<body onload="onload()">
+    <canvas id="canvas" width="256" height="240" style="background: #000"></canvas>
+    <br><b>Controls</b>: arrow keys + X + C + Start + Esc
+    <style>
+        body {
+            font: 14px Arial
+        }
+
+        canvas {
+            background: #000;
+            height: calc(100vmin - 60px);
+            width: calc((100vmin - 60px) * 1.067);
+            image-rendering: crisp-edges;
+            image-rendering: pixelated;
+        }
+    </style>
+</body>
+
+<script src="https://unpkg.com/jsnes/dist/jsnes.min.js"></script>
+<script>
+    // Canvas + framebuffer
+    // ====================
+    var ctx = canvas.getContext("2d");
+    var imageData = ctx.getImageData(0, 0, 256, 240);
+    var frameBuffer = new ArrayBuffer(imageData.data.length);
+    var frameBuffer8 = new Uint8ClampedArray(frameBuffer);
+    var frameBuffer32 = new Uint32Array(frameBuffer);
+
+    // AudioContext + audio buffers + samples lists
+    // =============================================
+    var audio = new AudioContext();
+    var audioprocessor = audio.createScriptProcessor(512, 0, 2);
+    audioprocessor.connect(audio.destination);
+
+    // When the Audio processor requests new samples to play
+    audioprocessor.onaudioprocess = audioEvent => {
+        // Ensure that we've buffered enough samples
+        if (leftSamples.length > currentSample + 512) {
+            for (var i = 0; i < 512; i++) {
+                // Output (play) the buffers
+                audioEvent.outputBuffer.getChannelData(0)[i] = leftSamples[currentSample];
+                audioEvent.outputBuffer.getChannelData(1)[i] = rightSamples[currentSample];
+                currentSample++;
+            }
+        }
+    }
+
+    var leftSamples = [];
+    var rightSamples = [];
+    var currentSample = 0;
+
+    function parseQuery() {
+        const parsedQuery = {};
+
+        let queryString = document.location.search.substring(1) + "&" + window.location.hash.substring(1);
+
+        queryString.split("&").forEach(function (keyval) {
+            const keyAndVal = keyval.split("=");
+            const key = decodeURIComponent(keyAndVal[0]);
+
+            let val = null;
+            if (keyAndVal.length > 1) val = decodeURIComponent(keyAndVal[1]);
+            parsedQuery[key] = val;
+        });
+
+        return parsedQuery;
+    }
+
+    function b64ToUint6(nChr) {
+        return nChr > 64 && nChr < 91
+            ? nChr - 65
+            : nChr > 96 && nChr < 123
+                ? nChr - 71
+                : nChr > 47 && nChr < 58
+                    ? nChr + 4
+                    : nChr === 43
+                        ? 62
+                        : nChr === 47
+                            ? 63
+                            : 0;
+    }
+
+    function base64DecToStr(sBase64, nBlocksSize) {
+        const sB64Enc = sBase64.replace(/[^A-Za-z0-9+/]/g, "");
+        const nInLen = sB64Enc.length;
+        const nOutLen = nBlocksSize
+            ? Math.ceil(((nInLen * 3 + 1) >> 2) / nBlocksSize) * nBlocksSize
+            : (nInLen * 3 + 1) >> 2;
+        let taBytes = "";
+
+        let nMod3;
+        let nMod4;
+        let nUint24 = 0;
+        let nOutIdx = 0;
+        for (let nInIdx = 0; nInIdx < nInLen; nInIdx++) {
+            nMod4 = nInIdx & 3;
+            nUint24 |= b64ToUint6(sB64Enc.charCodeAt(nInIdx)) << (6 * (3 - nMod4));
+            if (nMod4 === 3 || nInLen - nInIdx === 1) {
+                nMod3 = 0;
+                while (nMod3 < 3 && nOutIdx < nOutLen) {
+                    taBytes += String.fromCharCode((nUint24 >>> ((16 >>> nMod3) & 24)) & 255);
+                    nMod3++;
+                    nOutIdx++;
+                }
+                nUint24 = 0;
+            }
+        }
+
+        return taBytes;
+    }
+
+    function onload() {
+        const parsedQuery = parseQuery();
+
+        if (parsedQuery['b64nes']) {
+            var nes = new jsnes.NES({
+                // Display each new frame on the canvas
+                onFrame: function (frameBuffer) {
+                    var i = 0;
+                    for (var y = 0; y < 256; ++y) {
+                        for (var x = 0; x < 240; ++x) {
+                            i = y * 256 + x;
+                            frameBuffer32[i] = 0xff000000 | frameBuffer[i];
+                        }
+                    }
+                    imageData.data.set(frameBuffer8);
+                    ctx.putImageData(imageData, 0, 0);
+                },
+
+                // Add new audio samples to the Audio buffers
+                onAudioSample: function (left, right) {
+                    //console.log(left, right);
+                    leftSamples.push(left);
+                    rightSamples.push(right);
+                },
+
+                // Pass the browser's sample rate to the emulator
+                sampleRate: 44100,
+            });
+
+            // Send ROM to emulator
+            nes.loadROM(base64DecToStr(parsedQuery['b64nes']));
+
+            // 60 fps loop
+            setInterval(nes.frame, 16);
+
+            // Controller #1 keys listeners
+            onkeydown = onkeyup = e => {
+                nes[e.type == "keyup" ? "buttonUp" : "buttonDown"](
+                    1,
+                    jsnes.Controller["BUTTON_" +
+                    {
+                        37: "LEFT",
+                        38: "UP",
+                        39: "RIGHT",
+                        40: "DOWN",
+                        88: "A", // X
+                        67: "B", // C
+                        27: "SELECT",
+                        13: "START"
+                    }[e.keyCode]
+                    ]
+                )
+            }
+        }
+    }
+</script>
+
+</html>
